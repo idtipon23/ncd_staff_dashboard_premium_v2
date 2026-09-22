@@ -1,0 +1,59 @@
+# ========================================================
+# Flutter & Dart Core Ignore Rules
+# ========================================================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+
+# ========================================================
+# Build Outputs & Heavy Cache (ป้องกันปัญหาไฟล์ใหญ่เกิน 100MB)
+# ========================================================
+build/
+**/build/
+android/build/
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+ios/.generated/
+ios/Flutter/.last_build_id
+/coverage/
+
+# ========================================================
+# IDEs & Editor Artifacts
+# ========================================================
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+devtools_options.yaml
+
+# ========================================================
+# Environment & Sensitive Secrets
+# ========================================================
+.env
+.env.*
+!.env.example
+
+# ========================================================
+# Miscellaneous & System Logs
+# ========================================================
+*.class
+*.log
+*.pyc
+*.swp
+app.*.symbols
+app.*.map.json
+.widget_preview/
+migrate_working_dir/
+**/doc/api/
