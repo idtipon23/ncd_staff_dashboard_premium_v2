@@ -254,6 +254,66 @@ class TriageRepository {
       return [];
     }
   }
+  /// ดึงและจัดกลุ่มยาปัจจุบันของผู้ป่วยสำหรับส่งเข้า CDSS Engine
+  Future<List<String>> fetchPatientMedicationClasses(String patientId) async {
+    try {
+      final medRes = await _client
+          .from('medication_logs')
+          .select('medication_name')
+          .eq('patient_id', patientId);
+
+      final List<dynamic> medLogs = medRes as List<dynamic>;
+      final Set<String> detectedClasses = {};
+
+      for (final m in medLogs) {
+        final name = (m['medication_name'] ?? '').toString().toLowerCase();
+        if (name.contains('dipine') || name.contains('norvasc') || name.contains('amlodipine') || name.contains('manidipine')) {
+          detectedClasses.add('CCB');
+        } else if (name.contains('pril') || name.contains('enalapril') || name.contains('lisinopril')) {
+          detectedClasses.add('ACEI');
+        } else if (name.contains('sartan') || name.contains('losartan') || name.contains('valsartan') || name.contains('candesartan')) {
+          detectedClasses.add('ARB');
+        } else if (name.contains('hctz') || name.contains('thiazide') || name.contains('indapamide') || name.contains('chlorthalidone')) {
+          detectedClasses.add('Thiazide-Diuretic');
+        } else if (name.contains('furosemide') || name.contains('lasix')) {
+          detectedClasses.add('Loop-Diuretic');
+        } else if (name.contains('spironolactone') || name.contains('aldactone')) {
+          detectedClasses.add('Spironolactone');
+        } else if (name.contains('lol') || name.contains('atenolol') || name.contains('metoprolol') || name.contains('carvedilol') || name.contains('bisoprolol')) {
+          detectedClasses.add('Beta-blocker');
+        } else if (name.contains('zosin') || name.contains('doxazosin')) {
+          detectedClasses.add('Alpha-blocker');
+        } else if (name.isNotEmpty) {
+          detectedClasses.add(m['medication_name'].toString());
+        }
+      }
+      return detectedClasses.toList();
+    } catch (e) {
+      debugPrint('⚠️ Fetch medication classes error: $e');
+      return [];
+    }
+  }
+
+  /// ดึงค่า Creatinine ครั้งก่อนหน้าเพื่อประเมินเกณฑ์ความปลอดภัย Creatinine Rise > 30%
+  Future<double> fetchBaselineCreatinine(String patientId) async {
+    try {
+      final pastLabs = await _client
+          .from('lab_results')
+          .select('creatinine')
+          .eq('patient_id', patientId)
+          .order('lab_date', ascending: false)
+          .limit(2);
+
+      final list = pastLabs as List<dynamic>;
+      if (list.length > 1) {
+        return (list[1]['creatinine'] as num?)?.toDouble() ?? 0.0;
+      }
+      return 0.0;
+    } catch (e) {
+      debugPrint('⚠️ Fetch baseline creatinine error: $e');
+      return 0.0;
+    }
+  }
 
   Future<List<DailyBpAverage>> fetchAggregateBpTrend() async {
     try {
@@ -627,8 +687,11 @@ extension TriageTimelineExtension on TriageRepository {
         final isLow = (sys > 0 && sys < 100) || (dia > 0 && dia < 60);
 
         String severity = 'NORMAL';
-        if (isCrisis) severity = 'CRITICAL';
-        else if (isLow) severity = 'WARNING';
+        if (isCrisis) {
+          severity = 'CRITICAL';
+        } else if (isLow) {
+          severity = 'WARNING';
+        }
 
         events.add(ClinicalTimelineEvent(
           id: 'vital_${v['id']}',

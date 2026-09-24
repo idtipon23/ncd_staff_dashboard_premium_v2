@@ -139,62 +139,21 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     double? baselineCreatinine;
 
     try {
-      final medRes = await Supabase.instance.client
-          .from('medication_logs')
-          .select('medication_name')
-          .eq('patient_id', targetPatientId);
+      // 1. ดึงกลุ่มยาผ่าน Repository
+      realMedClasses = await ref
+          .read(triageRepositoryProvider)
+          .fetchPatientMedicationClasses(targetPatientId);
+      realMedCount = realMedClasses.length;
 
-      final List<dynamic> medLogs = medRes as List<dynamic>;
-      final Set<String> detectedClasses = {};
-
-      for (final m in medLogs) {
-        final name = (m['medication_name'] ?? '').toString().toLowerCase().trim();
-        if (name.isEmpty) continue;
-
-        if (name.contains('amlo') || name.contains('dipine') || name.contains('norvasc') ||
-            name.contains('manidipine') || name.contains('lercanidipine')) {
-          detectedClasses.add('CCB');
-        } else if (name.contains('enaril') || name.contains('enalapril') || name.contains('pril') ||
-            name.contains('lisinopril') || name.contains('ramipril') || name.contains('captopril')) {
-          detectedClasses.add('ACEI');
-        } else if (name.contains('sartan')) {
-          detectedClasses.add('ARB');
-        } else if (name.contains('hctz') || name.contains('thiazide') || name.contains('indapamide') ||
-            name.contains('chlorthalidone') || name.contains('natrilix')) {
-          detectedClasses.add('Thiazide-Diuretic');
-        } else if (name.contains('furosemide') || name.contains('lasix')) {
-          detectedClasses.add('Loop-Diuretic');
-        } else if (name.contains('spironolactone') || name.contains('aldactone')) {
-          detectedClasses.add('Spironolactone');
-        } else if (name.contains('lol')) {
-          detectedClasses.add('Beta-blocker');
-        } else if (name.contains('zosin') || name.contains('cardura')) {
-          detectedClasses.add('Alpha-blocker');
-        } else {
-          detectedClasses.add(m['medication_name'].toString());
-        }
-      }
-
-      realMedClasses = detectedClasses.toList();
-      realMedCount = medLogs.length;
-
-      final pastLabs = await Supabase.instance.client
-          .from('lab_results')
-          .select('creatinine')
-          .eq('patient_id', targetPatientId)
-          .order('lab_date', ascending: false)
-          .limit(2);
-
-      final labList = pastLabs as List<dynamic>;
-      if (labList.length > 1) {
-        baselineCreatinine = (labList[1]['creatinine'] as num?)?.toDouble();
-      }
+      // 2. ดึง Creatinine ย้อนหลังผ่าน Repository สำหรับตรวจ Creatinine Rise > 30% Rule
+      baselineCreatinine = await ref
+          .read(triageRepositoryProvider)
+          .fetchBaselineCreatinine(targetPatientId);
     } catch (e) {
       debugPrint('❌ Error fetching data for CDSS: $e');
     } finally {
       if (mounted) Navigator.of(context, rootNavigator: true).pop();
     }
-
     // 1. 🔒 Clinical Safety Guard: ดึงสัญญาณชีพจริง ไม่ใส่ค่าสมมุติ (0 = Insufficient Vitals)
     final latestVital = vitals.isNotEmpty ? vitals.first : <String, dynamic>{};
     final int officeSbp = (latestVital['systolic'] as num?)?.toInt() ?? 0;
