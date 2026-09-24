@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/constants/clinical_theme.dart';
 import 'core/widgets/app_shell.dart';
+import 'features/auth/presentation/staff_login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,7 +36,33 @@ class ClinicalMonitoringApp extends StatelessWidget {
       title: 'NCDs Clinical Command Center',
       debugShowCheckedModeBanner: false,
       theme: ClinicalTheme.lightTheme,
-      home: const AppShell(),
+      home: const StaffAuthGate(),
+    );
+  }
+}
+
+/// ประตูดักจับสถานะการเข้าสู่ระบบของบุคลากร (Reactive Staff Auth Gate)
+class StaffAuthGate extends StatelessWidget {
+  const StaffAuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        // ตรวจสอบ Session จาก Stream หรือ Local Session ปัจจุบัน
+        final session = snapshot.hasData
+            ? snapshot.data!.session
+            : Supabase.instance.client.auth.currentSession;
+
+        // หากยังไม่ได้ล็อกอิน ให้พาไปหน้าเข้าสู่ระบบบุคลากร
+        if (session == null) {
+          return const StaffLoginScreen();
+        }
+
+        // หากล็อกอินเรียบร้อยแล้ว ให้เข้าสู่แดชบอร์ดหลักของคลินิก
+        return const AppShell();
+      },
     );
   }
 }

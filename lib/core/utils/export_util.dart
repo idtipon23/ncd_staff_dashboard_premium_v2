@@ -1,28 +1,18 @@
 // lib/core/utils/export_util.dart
-// ignore_for_file: avoid_web_libraries_in_flutter
 
 import 'dart:convert';
-import 'dart:html' as html;
 import 'package:csv/csv.dart';
 
 import '../../features/overview/data/patient_triage_model.dart';
 import '../../features/analytics/domain/population_kpi_rules.dart';
+import 'web_file_utils.dart';
 
 class ExportUtil {
-  /// ฟังก์ชันภายในสำหรับสร้าง Blob และดาวน์โหลดไฟล์ผ่านเบราว์เซอร์ (Web/PWA)
-  static void _downloadWebCsv(String csvContent, String fileName) {
-    // กำหนด UTF-8 BOM (\uFEFF) เพื่อให้เปิดใน Microsoft Excel ภาษาไทยได้ถูกต้อง
+  /// ดาวน์โหลด CSV ผ่านเบราว์เซอร์บน Web และไม่ทำอะไรบน VM/test runtime
+  static Future<void> _downloadCsvFile(String csvContent, String fileName) async {
     const bom = '\uFEFF';
     final fullCsv = csvContent.startsWith(bom) ? csvContent : bom + csvContent;
-    final bytes = utf8.encode(fullCsv);
-    final blob = html.Blob([bytes], 'text/csv;charset=utf-8');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-
-    html.AnchorElement(href: url)
-      ..setAttribute('download', fileName)
-      ..click();
-
-    html.Url.revokeObjectUrl(url);
+    await WebFileUtils.downloadCsv(fullCsv, fileName);
   }
 
   /// 1. ส่งออกรายชื่อผู้ป่วยในระบบ (Patient Registry)
@@ -71,7 +61,7 @@ class ExportUtil {
     final dateStr = DateTime.now().toIso8601String().split('T').first;
     final fileName = 'NCDs_Patient_Report_$dateStr.csv';
 
-    _downloadWebCsv(csvData, fileName);
+    _downloadCsvFile(csvData, fileName);
   }
 
   /// 2. ส่งออกรายงานสรุปภาพรวมสถิติคลินิก (Phase 4.2: Clinical Performance Report)
@@ -128,6 +118,6 @@ class ExportUtil {
     }
 
     final timestamp = now.toIso8601String().replaceAll(':', '-').split('.').first;
-    _downloadWebCsv(buffer.toString(), 'ncds_clinical_performance_report_$timestamp.csv');
+    _downloadCsvFile(buffer.toString(), 'ncds_clinical_performance_report_$timestamp.csv');
   }
 }
