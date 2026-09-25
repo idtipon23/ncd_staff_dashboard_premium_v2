@@ -95,6 +95,13 @@ final populationQualityKpiProvider = Provider.autoDispose<PopulationKpiSummary>(
   return PopulationKpiRules.computeQualityKpis(patients);
 });
 
+final criticalPatientCountProvider = Provider.autoDispose<int>((ref) {
+  final patients = ref.watch(triageOverviewProvider).asData?.value ?? const [];
+  return patients
+      .where((patient) => evaluatePatientTriage(patient) == TriageCategory.critical)
+      .length;
+});
+
 final patientCareGapsProvider = Provider.autoDispose.family<List<CareGapItem>, PatientDetailData>((ref, detailData) {
   return CareGapRules.evaluateCareGaps(
     patient: detailData.patient,
@@ -186,40 +193,36 @@ class TriageRepository {
   TriageRepository(this._client);
 
   Future<List<PatientTriageModel>> fetchTriageOverview() async {
-    // 1. ดึงข้อมูลภาพรวมจาก View
-    final response = await _client
-        .from('triage_overview_view')
-        .select('*')
-        .order('triage_status', ascending: true);
+    final results = await Future.wait<dynamic>([
+      _client
+          .from('triage_overview_view')
+          .select('*')
+          .order('triage_status', ascending: true),
+      _client.from('medication_logs').select('patient_id').catchError((_) => []),
+      _client
+          .from('patients')
+          .select('id, current_med_classes')
+          .catchError((_) => []),
+    ]);
 
-    final rawList = response as List;
-
-    // 2. ดึงข้อมูลประวัติการใช้ยา เพื่อคัดกรองกลุ่ม Medicated ได้แม่นยำ
+    final rawList = results[0] as List;
+    final medicationRows = results[1] as List;
+    final patientRows = results[2] as List;
     final Set<String> medicatedPatientIds = {};
 
-    try {
-      final medRes = await _client.from('medication_logs').select('patient_id');
-      for (final m in (medRes as List)) {
-        final pid = m['patient_id']?.toString();
-        if (pid != null && pid.isNotEmpty) {
-          medicatedPatientIds.add(pid);
-        }
+    for (final m in medicationRows) {
+      final pid = m['patient_id']?.toString();
+      if (pid != null && pid.isNotEmpty) {
+        medicatedPatientIds.add(pid);
       }
-    } catch (_) {
-      // ข้ามหากไม่มีตาราง
     }
 
-    try {
-      final patRes = await _client.from('patients').select('id, current_med_classes');
-      for (final p in (patRes as List)) {
-        final pid = p['id']?.toString();
-        final meds = p['current_med_classes'];
-        if (pid != null && meds is List && meds.isNotEmpty) {
-          medicatedPatientIds.add(pid);
-        }
+    for (final p in patientRows) {
+      final pid = p['id']?.toString();
+      final meds = p['current_med_classes'];
+      if (pid != null && meds is List && meds.isNotEmpty) {
+        medicatedPatientIds.add(pid);
       }
-    } catch (_) {
-      // ข้ามหากไม่มีคอลัมน์
     }
 
     // 3. แปลงเป็น PatientTriageModel พร้อมผูกสถานะการใช้ยา
@@ -299,7 +302,7 @@ class TriageRepository {
     try {
       final pastLabs = await _client
           .from('lab_results')
-          .select('creatinine')
+          .select('*')
           .eq('patient_id', patientId)
           .order('lab_date', ascending: false)
           .limit(2);
@@ -354,49 +357,60 @@ class TriageRepository {
   }
 
   Future<PatientDetailData> fetchPatientDetail(String patientId) async {
-    // 1. ดึงข้อมูลคนไข้
-    final patientRes = await _client
+    final detailResults = await Future.wait<dynamic>([
+      _client
         .from('patients')
         .select('*')
         .eq('id', patientId)
-        .maybeSingle();
-
-    // 2. ดึงประวัติสัญญาณชีพย้อนหลัง
-    final vitalsRes = await _client
+        .maybeSingle(),
+      _client
         .from('vital_signs')
         .select('*')
         .eq('patient_id', patientId)
         .order('recorded_at', ascending: false)
-        .limit(10);
-
-    // 3. ดึงผลแล็บล่าสุด
-    final labRes = await _client
+        .limit(10),
+      _client
         .from('lab_results')
         .select('*')
         .eq('patient_id', patientId)
         .order('lab_date', ascending: false)
-        .limit(1);
-
-    // 4. ดึงบันทึกมื้ออาหารล่าสุด
-    final foodRes = await _client
+        .limit(1),
+      _client
         .from('food_logs')
         .select('*')
         .eq('patient_id', patientId)
         .order('recorded_at', ascending: false)
-        .limit(5);
-
-    // 5. ดึงบันทึกของเจ้าหน้าที่
-    final notesRes = await _client
+        .limit(5),
+      _client
         .from('staff_notes')
         .select('*')
         .eq('patient_id', patientId)
-        .order('created_at', ascending: false);
-
-    final appointmentsRes = await _client
+        .order('created_at', ascending: false),
+      _client
         .from('appointments')
         .select('*')
         .eq('patient_id', patientId)
-        .order('appointment_date', ascending: false);
+        .order('appointment_date', ascending: false),
+      () async {
+      try {
+        return await _client
+          .from('medication_logs')
+          .select('*')
+          .eq('patient_id', patientId)
+          .order('recorded_at', ascending: false);
+      } catch (_) {
+        return <dynamic>[];
+      }
+      }(),
+    ]);
+
+    final patientRes = detailResults[0] as Map<String, dynamic>?;
+    final vitalsRes = detailResults[1] as List;
+    final labRes = detailResults[2] as List;
+    final foodRes = detailResults[3] as List;
+    final notesRes = detailResults[4] as List;
+    final appointmentsRes = detailResults[5] as List;
+    final medicationsRes = detailResults[6] as List;
 
     return PatientDetailData(
       patient: patientRes != null ? Map<String, dynamic>.from(patientRes) : {},
@@ -405,6 +419,7 @@ class TriageRepository {
       recentFoods: List<Map<String, dynamic>>.from(foodRes),
       staffNotes: List<Map<String, dynamic>>.from(notesRes),
       appointments: List<Map<String, dynamic>>.from(appointmentsRes),
+      medications: List<Map<String, dynamic>>.from(medicationsRes),
     );
   }
 
@@ -671,15 +686,32 @@ extension TriageTimelineExtension on TriageRepository {
     final List<ClinicalTimelineEvent> events = [];
 
     try {
-      // 1. ดึงสัญญาณชีพ (Vital Signs)
-      final vitalsRes = await Supabase.instance.client
-          .from('vital_signs')
-          .select('id, systolic, diastolic, pulse, urgency_level, recorded_at, spoken_feedback')
-          .eq('patient_id', patientId)
-          .order('recorded_at', ascending: false)
-          .limit(15);
+      final results = await Future.wait<dynamic>([
+      Supabase.instance.client
+        .from('vital_signs')
+        .select('id, systolic, diastolic, pulse, urgency_level, recorded_at, spoken_feedback')
+        .eq('patient_id', patientId)
+        .order('recorded_at', ascending: false)
+        .limit(15),
+      Supabase.instance.client
+        .from('staff_notes')
+        .select('id, note_text, staff_name, created_at')
+        .eq('patient_id', patientId)
+        .order('created_at', ascending: false)
+        .limit(10),
+      Supabase.instance.client
+        .from('appointments')
+        .select('id, appointment_date, reason, clinic_name, status, created_at')
+        .eq('patient_id', patientId)
+        .order('created_at', ascending: false)
+        .limit(5),
+      ]);
 
-      for (final v in vitalsRes as List) {
+      final vitalsRes = results[0] as List;
+      final notesRes = results[1] as List;
+      final apptRes = results[2] as List;
+
+      for (final v in vitalsRes) {
         final date = DateTime.tryParse(v['recorded_at'] ?? '') ?? DateTime.now();
         final sys = v['systolic'] ?? 0;
         final dia = v['diastolic'] ?? 0;
@@ -704,15 +736,7 @@ extension TriageTimelineExtension on TriageRepository {
         ));
       }
 
-      // 2. ดึงประวัติคำสั่งการ/ส่งข้อความของเจ้าหน้าที่ (Staff Notes)
-      final notesRes = await Supabase.instance.client
-          .from('staff_notes')
-          .select('id, note_text, staff_name, created_at')
-          .eq('patient_id', patientId)
-          .order('created_at', ascending: false)
-          .limit(10);
-
-      for (final n in notesRes as List) {
+      for (final n in notesRes) {
         final date = DateTime.tryParse(n['created_at'] ?? '') ?? DateTime.now();
 
         events.add(ClinicalTimelineEvent(
@@ -726,15 +750,7 @@ extension TriageTimelineExtension on TriageRepository {
         ));
       }
 
-      // 3. ดึงประวัติการนัดหมาย (Appointments)
-      final apptRes = await Supabase.instance.client
-          .from('appointments')
-          .select('id, appointment_date, reason, clinic_name, status, created_at')
-          .eq('patient_id', patientId)
-          .order('created_at', ascending: false)
-          .limit(5);
-
-      for (final a in apptRes as List) {
+      for (final a in apptRes) {
         final date = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.now();
         final apptDate = a['appointment_date']?.toString().split('T').first ?? '-';
 

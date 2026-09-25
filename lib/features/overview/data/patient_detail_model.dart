@@ -7,6 +7,7 @@ class PatientDetailData {
   final List<Map<String, dynamic>> recentFoods;
   final List<Map<String, dynamic>> staffNotes;
   final List<Map<String, dynamic>> appointments;
+  final List<Map<String, dynamic>> medications;
 
   PatientDetailData({
     required this.patient,
@@ -15,5 +16,6 @@ class PatientDetailData {
     required this.recentFoods,
     required this.staffNotes,
     required this.appointments,
+    this.medications = const [],
   });
 }

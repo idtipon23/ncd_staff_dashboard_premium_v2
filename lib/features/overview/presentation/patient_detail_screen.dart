@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'widgets/lab_history_comparison_dialog.dart';
 import '../../triage/domain/risk_stratification_rules.dart';
 import '../../../core/constants/clinical_theme.dart';
 import '../../../screens/patient_clinical_recommendation_sheet.dart';
@@ -158,16 +158,14 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     double? baselineCreatinine;
 
     try {
-      // 1. ดึงกลุ่มยาผ่าน Repository
-      realMedClasses = await ref
-          .read(triageRepositoryProvider)
-          .fetchPatientMedicationClasses(targetPatientId);
+      final repository = ref.read(triageRepositoryProvider);
+      final cdssData = await Future.wait<dynamic>([
+        repository.fetchPatientMedicationClasses(targetPatientId),
+        repository.fetchBaselineCreatinine(targetPatientId),
+      ]);
+      realMedClasses = cdssData[0] as List<String>;
       realMedCount = realMedClasses.length;
-
-      // 2. ดึง Creatinine ย้อนหลังผ่าน Repository สำหรับตรวจ Creatinine Rise > 30% Rule
-      baselineCreatinine = await ref
-          .read(triageRepositoryProvider)
-          .fetchBaselineCreatinine(targetPatientId);
+      baselineCreatinine = cdssData[1] as double;
     } catch (e) {
       debugPrint('❌ Error fetching data for CDSS: $e');
     } finally {
@@ -1085,11 +1083,6 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
           ),
         ),
         data: (data) {
-          // ใช้ patient ID ที่ตรงกับ CDSS เพื่อความแม่นยำ
-          final targetId = data.patient['id']?.toString() ?? widget.patientId;
-          final medsAsync = ref.watch(patientMedicationsProvider(targetId));
-          final medications = medsAsync.value ?? const [];
-
           List<Map<String, dynamic>> patientAppointments = const [];
           try {
             final dyn = data as dynamic;
@@ -1112,14 +1105,6 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
             vitals: data.vitalSigns,
             latestLab: data.latestLab,
             appointments: patientAppointments,
-          );
-
-          // 🌟 สแกนความปลอดภัยของยา
-          final medSafetyAlerts = MedicationSafetyRules.evaluateSafety(
-            medications: medications,
-            latestLab: data.latestLab,
-            vitals: data.vitalSigns,
-            patient: data.patient,
           );
 
           // 🟢 1. สกัดข้อมูลสัญญาณชีพล่าสุดและชื่อคนไข้สำหรับ OPD Card
@@ -1178,10 +1163,15 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                                       CrossAxisAlignment.stretch,
                                   children: [
                                     _buildMedicationCard(
-                                      medications,
-                                      medSafetyAlerts,
-                                      medsAsync.isLoading,
-                                    ), // 👈 แสดงการ์ดยาและความปลอดภัย
+                                      data.medications,
+                                      MedicationSafetyRules.evaluateSafety(
+                                        medications: data.medications,
+                                        latestLab: data.latestLab,
+                                        vitals: data.vitalSigns,
+                                        patient: data.patient,
+                                      ),
+                                      false,
+                                    ),
                                     const SizedBox(height: 24),
                                     _buildFoodLogsCard(data.recentFoods),
                                     const SizedBox(height: 24),
@@ -1204,10 +1194,15 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
                               _buildLabCard(data.latestLab),
                               const SizedBox(height: 24),
                               _buildMedicationCard(
-                                medications,
-                                medSafetyAlerts,
-                                medsAsync.isLoading,
-                              ), // 👈 แสดงการ์ดยาและความปลอดภัย
+                                data.medications,
+                                MedicationSafetyRules.evaluateSafety(
+                                  medications: data.medications,
+                                  latestLab: data.latestLab,
+                                  vitals: data.vitalSigns,
+                                  patient: data.patient,
+                                ),
+                                false,
+                              ),
                               const SizedBox(height: 24),
                               _buildFoodLogsCard(data.recentFoods),
                               const SizedBox(height: 24),
@@ -1749,7 +1744,70 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
     );
   }
 
-  Widget _buildLabCard(Map<String, dynamic>? lab) {
+  Widget _buildLabCard(Map<String, dynamic>? lab, [Map<String, dynamic>? patient]) {
+    final patientName = patient != null
+        ? (patient['name'] ?? '${patient['first_name'] ?? ''} ${patient['last_name'] ?? ''}').toString().trim()
+        : 'ผู้ป่วย';
+    final hn = patient?['hn']?.toString() ?? '-';
+
+    if (lab == null || lab.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: ClinicalColors.surfaceWhite,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: ClinicalColors.borderLight),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.biotech_rounded, color: ClinicalColors.primaryEmerald),
+                    SizedBox(width: 8),
+                    Text('ผลตรวจทางห้องปฏิบัติการ (Latest Labs)',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalColors.textPrimary)),
+                  ],
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => LabHistoryComparisonDialog(
+                        patientId: widget.patientId,
+                        patientName: patientName.isNotEmpty ? patientName : 'ผู้ป่วย',
+                        hn: hn,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.compare_arrows_rounded, size: 16, color: Color(0xFF0284C7)),
+                  label: const Text('ดูประวัติผลแล็บ',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFFBAE6FD)),
+                    backgroundColor: const Color(0xFFF0F9FF),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Center(
+              child: Text('ยังไม่มีข้อมูลผลตรวจแล็บในระบบ',
+                  style: TextStyle(color: ClinicalColors.textMuted, fontSize: 13)),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      );
+    }
+
+    final labDate = lab['lab_date']?.toString() ?? '-';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1758,65 +1816,188 @@ class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen>
         border: Border.all(color: ClinicalColors.borderLight),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'ผลตรวจแล็บล่าสุด (Laboratory Results)',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          if (lab == null)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'ไม่มีประวัติผลแล็บ',
-                  style: TextStyle(color: ClinicalColors.textMuted),
+          // ส่วนหัวการ์ด พร้อมปุ่มกดดูกราฟและตารางเปรียบเทียบย้อนหลัง
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.biotech_rounded, color: ClinicalColors.primaryEmerald),
+                  const SizedBox(width: 8),
+                  const Text('ผลตรวจทางห้องปฏิบัติการ (Latest Labs)',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClinicalColors.textPrimary)),
+                  const SizedBox(width: 8),
+                  Text('(ตรวจ: $labDate)', style: const TextStyle(fontSize: 12, color: ClinicalColors.textMuted)),
+                ],
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => LabHistoryComparisonDialog(
+                      patientId: widget.patientId,
+                      patientName: patientName.isNotEmpty ? patientName : 'ผู้ป่วย',
+                      hn: hn,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.compare_arrows_rounded, size: 16, color: Color(0xFF0284C7)),
+                label: const Text('ประวัติและเปรียบเทียบผลแล็บ',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFBAE6FD)),
+                  backgroundColor: const Color(0xFFF0F9FF),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-            )
-          else
-            Row(
-              children: [
-                _buildLabItem(
-                  'FBS (น้ำตาล)',
-                  '${lab['fasting_blood_sugar'] ?? '-'} mg/dL',
-                ),
-                _buildLabItem('HbA1c', '${lab['hba1c'] ?? '-'} %'),
-                _buildLabItem('eGFR (ไต)', '${lab['egfr'] ?? '-'}'),
-                _buildLabItem('Creatinine', '${lab['creatinine'] ?? '-'}'),
-              ],
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // 1. หมวดระดับน้ำตาลและการทำงานของไต (Glycemic & Renal Function)
+          const Text('1. ควบคุมระดับน้ำตาล & การทำงานของไต (Glycemic & Renal)',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClinicalColors.textMuted)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _buildLabChip('FBS', lab['fbs'], 'mg/dL', warnHigh: 126),
+              _buildLabChip('HbA1c', lab['hba1c'], '%', warnHigh: 7.0),
+              _buildLabChip('BUN', lab['bun'], 'mg/dL', warnHigh: 20),
+              _buildLabChip('Creatinine', lab['creatinine'], 'mg/dL', warnHigh: 1.2),
+              _buildLabChip('eGFR', lab['egfr'], 'ml/min', warnLow: 60),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // 2. หมวดไขมันในเลือด (Lipid Profile)
+          const Text('2. ไขมันในเลือด (Lipid Profile)',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClinicalColors.textMuted)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _buildLabChip('Total Chol', lab['cholesterol'], 'mg/dL', warnHigh: 200),
+              _buildLabChip('Triglyceride', lab['triglycerides'], 'mg/dL', warnHigh: 150),
+              _buildLabChip('HDL', lab['hdl'], 'mg/dL', warnLow: 40),
+              _buildLabChip('LDL', lab['ldl'], 'mg/dL', warnHigh: 100),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // 3. หมวดเกลือแร่, ตับ, และปัสสาวะ (Electrolytes, Liver & Urinalysis)
+          const Text('3. เกลือแร่ / ตับ / ปัสสาวะ (Electrolytes, Liver & Urine)',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClinicalColors.textMuted)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _buildLabChip('Na+', lab['sodium'], 'mEq/L', warnLow: 135, warnHigh: 145),
+              _buildLabChip('K+', lab['potassium'], 'mEq/L', warnLow: 3.5, warnHigh: 5.0),
+              _buildLabChip('Cl-', lab['chloride'], 'mEq/L'),
+              _buildLabChip('HCO3-', lab['bicarbonate'], 'mEq/L', warnLow: 22),
+              _buildLabChip('AST', lab['ast'], 'U/L', warnHigh: 40),
+              _buildLabChip('ALT', lab['alt'], 'U/L', warnHigh: 40),
+              _buildLabChip('ALP', lab['alp'], 'U/L', warnHigh: 120),
+              _buildLabChip('Uric Acid', lab['uric_acid'], 'mg/dL', warnHigh: 7.0),
+              if (lab['urine_microalbumin'] != null)
+                _buildLabChip('UACR', lab['urine_microalbumin'], 'mg/g Cr', warnHigh: 30),
+              if (lab['urine_protein'] != null)
+                _buildLabChip('Urine Protein', lab['urine_protein'], ''),
+            ],
+          ),
+
+          // สรุปผลการตรวจทางห้องปฏิบัติการ (ถ้ามี)
+          if (lab['clinical_interpretation'] != null &&
+              lab['clinical_interpretation'].toString().trim().isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.assignment_outlined, size: 16, color: Color(0xFF64748B)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'สรุปผลแล็บ: ${lab['clinical_interpretation']}',
+                      style: const TextStyle(fontSize: 13, color: ClinicalColors.textPrimary),
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildLabItem(String label, String value) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildLabChip(String label, dynamic rawValue, String unit, {double? warnHigh, double? warnLow}) {
+    if (rawValue == null || rawValue.toString().trim().isEmpty) return const SizedBox.shrink();
+    final numVal = (rawValue is num) ? rawValue.toDouble() : double.tryParse(rawValue.toString());
+    bool isAbnormal = false;
+    if (numVal != null) {
+      if (warnHigh != null && numVal > warnHigh) isAbnormal = true;
+      if (warnLow != null && numVal < warnLow) isAbnormal = true;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isAbnormal ? const Color(0xFFFEF2F2) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isAbnormal ? const Color(0xFFFCA5A5) : const Color(0xFFCBD5E1)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            label,
-            style: const TextStyle(
+            '$label: ',
+            style: TextStyle(
               fontSize: 12,
-              color: ClinicalColors.textMuted,
+              fontWeight: FontWeight.w600,
+              color: isAbnormal ? const Color(0xFFDC2626) : const Color(0xFF64748B),
             ),
           ),
-          const SizedBox(height: 4),
           Text(
-            value,
-            style: const TextStyle(
-              fontSize: 14,
+            rawValue.toString(),
+            style: TextStyle(
+              fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: ClinicalColors.primaryEmerald,
+              color: isAbnormal ? const Color(0xFFDC2626) : const Color(0xFF0F172A),
             ),
           ),
+          if (unit.isNotEmpty) ...[
+            const SizedBox(width: 4),
+            Text(
+              unit,
+              style: TextStyle(
+                fontSize: 11,
+                color: isAbnormal ? const Color(0xFFEF4444) : const Color(0xFF94A3B8),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  
 
   Widget _buildFoodLogsCard(List<Map<String, dynamic>> foods) {
     return Container(

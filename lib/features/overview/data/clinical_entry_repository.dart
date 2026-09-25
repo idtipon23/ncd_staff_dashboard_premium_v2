@@ -7,6 +7,17 @@ final clinicalEntryRepositoryProvider = Provider<ClinicalEntryRepository>((ref) 
   return ClinicalEntryRepository(Supabase.instance.client);
 });
 
+final patientLabHistoryProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, patientId) async {
+  final response = await Supabase.instance.client
+      .from('lab_results')
+      .select('*')
+      .eq('patient_id', patientId)
+      .order('lab_date', ascending: false);
+
+  return List<Map<String, dynamic>>.from(response);
+});
+
 class ClinicalEntryRepository {
   final SupabaseClient _client;
   ClinicalEntryRepository(this._client);
@@ -64,20 +75,37 @@ class ClinicalEntryRepository {
       'created_at': DateTime.now().toUtc().toIso8601String(),
     });
   }
+  
 
-  /// 2. บันทึกผลแล็บเลือดและปัสสาวะ (Lab Results)
+  /// 2. บันทึกผลแล็บครบวงจร (Comprehensive Lab Results)
   Future<void> saveLabResults({
     required String patientId,
     required DateTime labDate,
+    // Glycemic
     double? fbs,
     double? hba1c,
+    // Lipid Profile
+    double? totalCholesterol,
+    double? triglycerides,
+    double? hdl,
+    double? ldl,
+    // Renal & Electrolytes
+    double? bun,
     double? creatinine,
     double? egfr,
+    double? sodium,
     double? potassium,
-    double? totalCholesterol,
-    double? ldl,
-    double? hdl,
-    double? triglycerides,
+    double? chloride,
+    double? bicarbonate,
+    // Liver Function & Metabolic
+    double? ast,
+    double? alt,
+    double? alp,
+    double? uricAcid,
+    // Urine Tests
+    double? urineMicroalbumin,
+    String? urineProtein,
+    // Interpretation & Attachments
     String? interpretation,
     String? imageUrl,
   }) async {
@@ -91,15 +119,31 @@ class ClinicalEntryRepository {
       'patient_id': patientId,
       'lab_date': labDate.toIso8601String().split('T').first,
       'test_type': 'LAB',
+      // Glycemic
       'fbs': fbs,
       'hba1c': hba1c,
+      // Lipid
+      'cholesterol': totalCholesterol,
+      'triglycerides': triglycerides,
+      'hdl': hdl,
+      'ldl': ldl,
+      // Renal & Electrolytes
+      'bun': bun,
       'creatinine': creatinine,
       'egfr': egfr,
+      'sodium': sodium,
       'potassium': potassium,
-      'cholesterol': totalCholesterol,
-      'ldl': ldl,
-      'hdl': hdl,
-      'triglycerides': triglycerides,
+      'chloride': chloride,
+      'bicarbonate': bicarbonate,
+      // Liver & Metabolic
+      'ast': ast,
+      'alt': alt,
+      'alp': alp,
+      'uric_acid': uricAcid,
+      // Urine
+      'urine_microalbumin': urineMicroalbumin,
+      'urine_protein': urineProtein,
+      // Meta
       'clinical_interpretation': interpretation,
       'image_url': imageUrl,
       'staff_recorder_name': staffName,

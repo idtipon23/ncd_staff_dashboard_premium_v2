@@ -3,7 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import '../../features/analytics/presentation/clinical_audit_dashboard_screen.dart';
+import '../../features/settings/presentation/clinic_staff_management_screen.dart';
 import '../../features/communication/presentation/communication_center_screen.dart';
 import '../../features/overview/data/patient_triage_model.dart';
 import '../../features/overview/data/triage_repository.dart'
@@ -29,14 +30,16 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell> {
   static const _menuItems = [
-    (label: 'ภาพรวม (Command Center)', icon: Icons.dashboard_rounded),
-    (label: 'คัดกรองด่วน (Urgent Triage)', icon: Icons.flash_on_rounded),
-    (label: 'ทะเบียนผู้ป่วย (Registry)', icon: Icons.groups_rounded),
-    (label: 'บันทึกข้อมูล CDSS', icon: Icons.assignment_rounded),
-    (label: 'รายงานและสถิติ (Population)', icon: Icons.bar_chart_rounded),
-    (label: 'จัดการยา-นัดหมาย', icon: Icons.event_note_rounded),
-    (label: 'สื่อสารผู้ป่วย', icon: Icons.chat_bubble_rounded),
-    (label: 'ตั้งค่าระบบ', icon: Icons.settings_rounded),
+    (label: 'ภาพรวม (Command Center)', icon: Icons.dashboard_rounded),          // Index 0
+    (label: 'คัดกรองด่วน (Urgent Triage)', icon: Icons.flash_on_rounded),         // Index 1
+    (label: 'ทะเบียนผู้ป่วย (Registry)', icon: Icons.groups_rounded),              // Index 2
+    (label: 'บันทึกข้อมูล CDSS', icon: Icons.assignment_rounded),                 // Index 3
+    (label: 'รายงานและสถิติ (Population)', icon: Icons.bar_chart_rounded),        // Index 4
+    (label: 'คุณภาพเวชระเบียน & Audit', icon: Icons.verified_user_rounded),       // Index 5
+    (label: 'จัดการยา-นัดหมาย', icon: Icons.event_note_rounded),                   // Index 6
+    (label: 'สื่อสารผู้ป่วย', icon: Icons.chat_bubble_rounded),                   // Index 7
+    (label: 'จัดการบุคลากร & สิทธิ์', icon: Icons.badge_rounded),                  // Index 8
+    (label: 'ตั้งค่าระบบคลินิก', icon: Icons.settings_rounded),                    // Index 9
   ];
 
   final _searchController = TextEditingController();
@@ -71,21 +74,25 @@ class _AppShellState extends ConsumerState<AppShell> {
   Widget _buildSelectedPage() {
     switch (_selectedIndex) {
       case 0:
-        return const OverviewScreen(); // 1. หน้าภาพรวม Command Center
+        return const OverviewScreen();
       case 1:
-        return const UrgentTriageView(); // 2. หน้าคัดกรองเคสด่วนโดยเฉพาะ
+        return const UrgentTriageView();
       case 2:
-        return const PatientRegistryView(); // 3. หน้าทะเบียนรายชื่อผู้ป่วยโดยเฉพาะ
+        return const PatientRegistryView();
       case 3:
-        return const CdssDataEntryScreen(); // บันทึกข้อมูลและประเมินผล CDSS
+        return const CdssDataEntryScreen();
       case 4:
-        return const PopulationAnalyticsScreen(); // 4. หน้าสถิติและประชากร
+        return const PopulationAnalyticsScreen(); // 👈 หน้าสถิติประชากรเดิม
       case 5:
-        return const FollowUpManagementScreen(); // 5. หน้าจัดการยาและนัดหมายติดตามอาการ
+        return const ClinicalAuditDashboardScreen(); // 👈 ศูนย์ Audit
       case 6:
-        return const CommunicationCenterScreen(); // 6. หน้าสื่อสารผู้ป่วย
+        return const FollowUpManagementScreen();
       case 7:
-        return const ClinicSettingsScreen(); // เมนูตั้งค่าระบบและกำหนดสิทธิ์
+        return const CommunicationCenterScreen();
+      case 8:
+        return const ClinicStaffManagementScreen();
+      case 9:
+        return const ClinicSettingsScreen();
       default:
         return ClinicalWorkspacePlaceholder(
           featureName: _menuItems[_selectedIndex].label,
@@ -303,21 +310,10 @@ class _AppShellState extends ConsumerState<AppShell> {
     );
   }
 
-  Widget _buildHeader(bool isMobile) {
+  Widget _buildHeader(bool isMobile, WidgetRef ref) {
     final activeRole = ref.watch(currentStaffRoleProvider);
     final facility = ref.watch(currentFacilityProvider);
-    final patients =
-        ref.watch(triageOverviewProvider).asData?.value ??
-        const <PatientTriageModel>[];
-    final criticalCount = patients.where((patient) {
-      final category = TriageRules.evaluateTriage(
-        systolic: patient.systolic ?? 0,
-        diastolic: patient.diastolic ?? 0,
-        triageStatus: patient.triageStatus,
-        hasMeds: patient.hasMedication,
-      );
-      return category == TriageCategory.critical;
-    }).length;
+    final criticalCount = ref.watch(criticalPatientCountProvider);
 
     return Container(
       height: 80,
@@ -500,7 +496,10 @@ class _AppShellState extends ConsumerState<AppShell> {
           Expanded(
             child: Column(
               children: [
-                _buildHeader(isMobile),
+                Consumer(
+                  builder: (context, ref, child) =>
+                      _buildHeader(isMobile, ref),
+                ),
                 Expanded(child: _buildSelectedPage()),
               ],
             ),
