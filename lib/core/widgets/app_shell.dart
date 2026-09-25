@@ -20,6 +20,8 @@ import '../../features/settings/data/clinic_settings_model.dart';
 import '../../features/settings/presentation/clinic_settings_screen.dart';
 import '../../features/cdss/presentation/cdss_data_entry_screen.dart';
 import '../../features/patient_registry/presentation/widgets/patient_registration_dialog.dart';
+import '../../features/auth/data/staff_auth_repository.dart';
+import '../../features/auth/presentation/staff_login_screen.dart';
 
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
@@ -68,6 +70,49 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     if (MediaQuery.sizeOf(context).width < 900) {
       Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _signOut() async {
+    final shouldSignOut = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('ยืนยันการออกจากระบบ'),
+        content: const Text('คุณต้องการออกจากระบบเวชระเบียน NCDs ใช่หรือไม่?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: ClinicalColors.criticalRed,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('ยืนยัน'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSignOut != true || !mounted) return;
+
+    try {
+      await ref.read(staffAuthRepositoryProvider).signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const StaffLoginScreen()),
+        (route) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('ออกจากระบบไม่สำเร็จ: $error'),
+          backgroundColor: ClinicalColors.criticalRed,
+        ),
+      );
     }
   }
 
@@ -216,12 +261,64 @@ class _AppShellState extends ConsumerState<AppShell> {
                     _buildMenuItem(index),
                   const Spacer(),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
                     child: Text(
                       'NCDs Clinical Monitoring V3',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.45),
                         fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    child: Divider(color: Colors.white24, height: 1),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+                    child: Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(11),
+                      child: InkWell(
+                        onTap: _signOut,
+                        borderRadius: BorderRadius.circular(11),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(11),
+                            border: Border.all(
+                              color: const Color(0xFFE2E8F0),
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x180F172A),
+                                blurRadius: 8,
+                                offset: Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(
+                                Icons.logout_rounded,
+                                color: ClinicalColors.criticalRed,
+                                size: 20,
+                              ),
+                              SizedBox(width: 12),
+                              Text(
+                                'ออกจากระบบ',
+                                style: TextStyle(
+                                  color: ClinicalColors.criticalRed,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
